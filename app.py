@@ -12,10 +12,10 @@ if uploaded_file is not None:
     if uploaded_file.name.endswith(".csv"):
         df = pd.read_csv(uploaded_file)
     else:
-        # Kalau Excel, ambil sheet pertama
-        xls = pd.ExcelFile(uploaded_file)
-        sheet_name = xls.sheet_names[0]
-        df = pd.read_excel(uploaded_file, sheet_name=sheet_name)
+        # Kalau Excel, ambil sheet pertama pakai openpyxl
+        xls = pd.ExcelFile(uploaded_file, engine="openpyxl")
+        sheet_name = xls.sheet_names[0]  # ambil sheet pertama
+        df = pd.read_excel(uploaded_file, sheet_name=sheet_name, engine="openpyxl")
 
     st.success(f"✅ Data dari `{uploaded_file.name}` berhasil dimuat!")
     
@@ -23,31 +23,28 @@ if uploaded_file is not None:
     st.subheader("📋 Preview Data")
     st.dataframe(df.head())
 
-    # Cari kolom yang mirip
-    required_cols = ["KPH", "Jenis Aset", "Nama Aset", "Nilai Perolehan", "Tahun", "Kondisi"]
+    # Cek kolom penting
+    required_cols = ["KPH", "Jenis", "Nama", "Nilai", "Tahun", "Kondisi"]
     matched_cols = [col for col in df.columns if any(req.lower() in col.lower() for req in required_cols)]
     
     if len(matched_cols) >= 4:
-        # Pastikan kolom nilai jadi numerik
-        for col in df.columns:
-            if "nilai" in col.lower():
-                df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+        # Cari kolom nilai (yang ada kata "nilai")
+        nilai_col = next((c for c in df.columns if "nilai" in c.lower()), None)
+        if nilai_col:
+            df[nilai_col] = pd.to_numeric(df[nilai_col], errors="coerce").fillna(0)
 
         # Ringkasan
         col1, col2 = st.columns(2)
         col1.metric("Total Aset", len(df))
-        
-        nilai_total = 0
-        for col in df.columns:
-            if "nilai" in col.lower():
-                nilai_total = df[col].sum()
-        col2.metric("Total Nilai (Rp)", f"{nilai_total:,.0f}")
+        if nilai_col:
+            col2.metric("Total Nilai (Rp)", f"{df[nilai_col].sum():,.0f}")
 
-        # Sidebar filter
-        st.sidebar.header("🔎 Filter Data")
+        # Cari kolom KPH & Jenis
         kph_col = next((c for c in df.columns if "kph" in c.lower()), None)
         jenis_col = next((c for c in df.columns if "jenis" in c.lower()), None)
         
+        # Filter sidebar
+        st.sidebar.header("🔎 Filter Data")
         filtered_df = df.copy()
         if kph_col:
             kph_filter = st.sidebar.multiselect("Filter KPH", df[kph_col].dropna().unique())
@@ -59,12 +56,12 @@ if uploaded_file is not None:
                 filtered_df = filtered_df[filtered_df[jenis_col].isin(jenis_filter)]
 
         # Grafik distribusi per jenis
-        if jenis_col and "nilai" in df.columns.str.lower().to_list()[0]:
+        if jenis_col and nilai_col:
             st.subheader("Distribusi Nilai Aset per Jenis")
             st.bar_chart(filtered_df.groupby(jenis_col)[nilai_col].sum())
         
         # Grafik distribusi per KPH
-        if kph_col and "nilai" in df.columns.str.lower().to_list()[0]:
+        if kph_col and nilai_col:
             st.subheader("Distribusi Nilai Aset per KPH")
             st.bar_chart(filtered_df.groupby(kph_col)[nilai_col].sum())
 
