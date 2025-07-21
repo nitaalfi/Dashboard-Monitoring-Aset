@@ -1,80 +1,86 @@
 import streamlit as st
 import pandas as pd
-import os
 
-DATA_FILE = "aset_data.csv"
+st.set_page_config(page_title="Dashboard Aset dari File", layout="wide")
+st.title("📊 Monitoring Aset Perhutani dari File Excel/CSV")
 
-# === Load data CSV (buat file kosong kalau belum ada) ===
+# === Upload file ===
+uploaded_file = st.file_uploader("📂 Upload file Excel/CSV aset", type=["xlsx", "xls", "csv"])
 
-st.set_page_config(page_title="Monitoring Aset Perhutani", layout="wide")
-st.title("📊 Monitoring Aset Perhutani")
-
-# === Form Input ===
-st.subheader("➕ Tambah Data Aset")
-
-with st.form("form_aset"):
-    kph = st.text_input("Nama KPH")
-    jenis = st.selectbox("Jenis Aset", ["Tanah", "Bangunan", "Kendaraan", "Peralatan"])
-    nama = st.text_input("Nama Aset")
-    nilai = st.number_input("Nilai Perolehan (Rp)", min_value=0)
-    tahun = st.number_input("Tahun Perolehan", min_value=1900, max_value=2100, value=2024)
-    kondisi = st.selectbox("Kondisi", ["Baik", "Rusak Ringan", "Rusak Berat"])
-    submit = st.form_submit_button("💾 Simpan")
-
-    if submit:
-        if kph and nama and nilai > 0:
-            new_data = pd.DataFrame([[kph, jenis, nama, nilai, tahun, kondisi]],
-                                    columns=df.columns)
-            df = pd.concat([df, new_data], ignore_index=True)
-            df.to_csv(DATA_FILE, index=False)
-            st.success("✅ Data berhasil disimpan!")
-        else:
-            st.error("⚠️ Harap isi semua data sebelum menyimpan.")
-
-# === Dashboard ===
-st.subheader("📈 Dashboard Aset")
-
-if not df.empty:
-    # Ringkasan
-    col1, col2 = st.columns(2)
-    col1.metric("Total Aset", len(df))
-    col2.metric("Total Nilai (Rp)", f"{df['Nilai Perolehan'].sum():,.0f}")
-
-    # Filter
-    st.sidebar.header("🔎 Filter Data")
-    kph_filter = st.sidebar.multiselect("Filter KPH", df["KPH"].unique())
-    jenis_filter = st.sidebar.multiselect("Filter Jenis Aset", df["Jenis Aset"].unique())
-
-    filtered_df = df.copy()
-    if kph_filter:
-        filtered_df = filtered_df[filtered_df["KPH"].isin(kph_filter)]
-    if jenis_filter:
-        filtered_df = filtered_df[filtered_df["Jenis Aset"].isin(jenis_filter)]
-
-    # Grafik distribusi per jenis
-    st.subheader("Distribusi Nilai Aset per Jenis")
-    if not filtered_df.empty:
-        st.bar_chart(filtered_df.groupby("Jenis Aset")["Nilai Perolehan"].sum())
+if uploaded_file is not None:
+    # Deteksi format file
+    if uploaded_file.name.endswith(".csv"):
+        df = pd.read_csv(uploaded_file)
     else:
-        st.info("Tidak ada data sesuai filter.")
+        # Kalau Excel, ambil sheet pertama
+        xls = pd.ExcelFile(uploaded_file)
+        sheet_name = xls.sheet_names[0]
+        df = pd.read_excel(uploaded_file, sheet_name=sheet_name)
 
-    # Grafik distribusi per KPH
-    st.subheader("Distribusi Nilai Aset per KPH")
-    if not filtered_df.empty:
-        st.bar_chart(filtered_df.groupby("KPH")["Nilai Perolehan"].sum())
+    st.success(f"✅ Data dari `{uploaded_file.name}` berhasil dimuat!")
+    
+    # Preview data
+    st.subheader("📋 Preview Data")
+    st.dataframe(df.head())
+
+    # Cari kolom yang mirip
+    required_cols = ["KPH", "Jenis Aset", "Nama Aset", "Nilai Perolehan", "Tahun", "Kondisi"]
+    matched_cols = [col for col in df.columns if any(req.lower() in col.lower() for req in required_cols)]
+    
+    if len(matched_cols) >= 4:
+        # Pastikan kolom nilai jadi numerik
+        for col in df.columns:
+            if "nilai" in col.lower():
+                df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+
+        # Ringkasan
+        col1, col2 = st.columns(2)
+        col1.metric("Total Aset", len(df))
+        
+        nilai_total = 0
+        for col in df.columns:
+            if "nilai" in col.lower():
+                nilai_total = df[col].sum()
+        col2.metric("Total Nilai (Rp)", f"{nilai_total:,.0f}")
+
+        # Sidebar filter
+        st.sidebar.header("🔎 Filter Data")
+        kph_col = next((c for c in df.columns if "kph" in c.lower()), None)
+        jenis_col = next((c for c in df.columns if "jenis" in c.lower()), None)
+        
+        filtered_df = df.copy()
+        if kph_col:
+            kph_filter = st.sidebar.multiselect("Filter KPH", df[kph_col].dropna().unique())
+            if kph_filter:
+                filtered_df = filtered_df[filtered_df[kph_col].isin(kph_filter)]
+        if jenis_col:
+            jenis_filter = st.sidebar.multiselect("Filter Jenis Aset", df[jenis_col].dropna().unique())
+            if jenis_filter:
+                filtered_df = filtered_df[filtered_df[jenis_col].isin(jenis_filter)]
+
+        # Grafik distribusi per jenis
+        if jenis_col and "nilai" in df.columns.str.lower().to_list()[0]:
+            st.subheader("Distribusi Nilai Aset per Jenis")
+            st.bar_chart(filtered_df.groupby(jenis_col)[nilai_col].sum())
+        
+        # Grafik distribusi per KPH
+        if kph_col and "nilai" in df.columns.str.lower().to_list()[0]:
+            st.subheader("Distribusi Nilai Aset per KPH")
+            st.bar_chart(filtered_df.groupby(kph_col)[nilai_col].sum())
+
+        # Tabel detail
+        st.subheader("📋 Data Detail")
+        st.dataframe(filtered_df)
+
+        # Download filtered data
+        st.download_button(
+            label="⬇️ Download Filtered CSV",
+            data=filtered_df.to_csv(index=False),
+            file_name="filtered_aset_data.csv",
+            mime="text/csv"
+        )
     else:
-        st.info("Tidak ada data sesuai filter.")
+        st.warning("⚠️ Kolom tidak sesuai format standar. Pastikan ada kolom KPH, Jenis Aset, Nilai Perolehan, Tahun, Kondisi.")
 
-    # Tabel detail
-    st.subheader("📋 Data Detail")
-    st.dataframe(filtered_df)
-
-    # Download data
-    st.download_button(
-        label="⬇️ Download Data CSV",
-        data=filtered_df.to_csv(index=False),
-        file_name="aset_data_download.csv",
-        mime="text/csv"
-    )
 else:
-    st.info("Belum ada data aset. Silakan input dulu di form di atas.")
+    st.info("Silakan upload file Excel/CSV untuk melihat dashboard.")
