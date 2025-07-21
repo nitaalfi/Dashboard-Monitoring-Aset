@@ -1,83 +1,86 @@
 import streamlit as st
 import pandas as pd
 
-st.set_page_config(page_title="Dashboard Aset dari File", layout="wide")
-st.title("📊 Monitoring Aset Perhutani dari File Excel/CSV")
+# ========================
+# Judul Dashboard
+# ========================
+st.set_page_config(page_title="Dashboard Monitoring Aset", layout="wide")
+st.title("📊 Dashboard Monitoring Aset Perhutani")
 
-# === Upload file ===
-uploaded_file = st.file_uploader("📂 Upload file Excel/CSV aset", type=["xlsx", "xls", "csv"])
+st.write("Upload file Excel Master Data Aset untuk melihat monitoring.")
 
-if uploaded_file is not None:
-    # Deteksi format file
-    if uploaded_file.name.endswith(".csv"):
-        df = pd.read_csv(uploaded_file)
-    else:
-        # Kalau Excel, ambil sheet pertama pakai openpyxl
+# ========================
+# Upload File Excel
+# ========================
+uploaded_file = st.file_uploader("📂 Upload File Excel (.xlsx)", type=["xlsx"])
+
+if uploaded_file:
+    st.success(f"✅ File **{uploaded_file.name}** berhasil diupload")
+
+    try:
+        # Cek semua sheet di Excel
         xls = pd.ExcelFile(uploaded_file, engine="openpyxl")
         sheet_name = xls.sheet_names[0]  # ambil sheet pertama
-        df = pd.read_excel(uploaded_file, sheet_name=sheet_name, engine="openpyxl")
 
-    st.success(f"✅ Data dari `{uploaded_file.name}` berhasil dimuat!")
-    
-    # Preview data
-    st.subheader("📋 Preview Data")
-    st.dataframe(df.head())
+        # Baca beberapa baris pertama untuk deteksi header
+        preview_df = pd.read_excel(uploaded_file, sheet_name=sheet_name, engine="openpyxl", nrows=5)
+        st.write("🔍 **Preview baris awal (untuk cek posisi header):**")
+        st.dataframe(preview_df)
 
-    # Cek kolom penting
-    required_cols = ["KPH", "Jenis", "Nama", "Nilai", "Tahun", "Kondisi"]
-    matched_cols = [col for col in df.columns if any(req.lower() in col.lower() for req in required_cols)]
-    
-    if len(matched_cols) >= 4:
-        # Cari kolom nilai (yang ada kata "nilai")
-        nilai_col = next((c for c in df.columns if "nilai" in c.lower()), None)
-        if nilai_col:
-            df[nilai_col] = pd.to_numeric(df[nilai_col], errors="coerce").fillna(0)
+        # Pilihan skiprows manual
+        skip_val = st.number_input("Lewati berapa baris awal? (skiprows)", min_value=0, max_value=10, value=1)
 
-        # Ringkasan
-        col1, col2 = st.columns(2)
-        col1.metric("Total Aset", len(df))
-        if nilai_col:
-            col2.metric("Total Nilai (Rp)", f"{df[nilai_col].sum():,.0f}")
-
-        # Cari kolom KPH & Jenis
-        kph_col = next((c for c in df.columns if "kph" in c.lower()), None)
-        jenis_col = next((c for c in df.columns if "jenis" in c.lower()), None)
-        
-        # Filter sidebar
-        st.sidebar.header("🔎 Filter Data")
-        filtered_df = df.copy()
-        if kph_col:
-            kph_filter = st.sidebar.multiselect("Filter KPH", df[kph_col].dropna().unique())
-            if kph_filter:
-                filtered_df = filtered_df[filtered_df[kph_col].isin(kph_filter)]
-        if jenis_col:
-            jenis_filter = st.sidebar.multiselect("Filter Jenis Aset", df[jenis_col].dropna().unique())
-            if jenis_filter:
-                filtered_df = filtered_df[filtered_df[jenis_col].isin(jenis_filter)]
-
-        # Grafik distribusi per jenis
-        if jenis_col and nilai_col:
-            st.subheader("Distribusi Nilai Aset per Jenis")
-            st.bar_chart(filtered_df.groupby(jenis_col)[nilai_col].sum())
-        
-        # Grafik distribusi per KPH
-        if kph_col and nilai_col:
-            st.subheader("Distribusi Nilai Aset per KPH")
-            st.bar_chart(filtered_df.groupby(kph_col)[nilai_col].sum())
-
-        # Tabel detail
-        st.subheader("📋 Data Detail")
-        st.dataframe(filtered_df)
-
-        # Download filtered data
-        st.download_button(
-            label="⬇️ Download Filtered CSV",
-            data=filtered_df.to_csv(index=False),
-            file_name="filtered_aset_data.csv",
-            mime="text/csv"
+        # Baca data aset dengan skiprows yang dipilih
+        df = pd.read_excel(
+            uploaded_file,
+            sheet_name=sheet_name,
+            engine="openpyxl",
+            skiprows=skip_val
         )
-    else:
-        st.warning("⚠️ Kolom tidak sesuai format standar. Pastikan ada kolom KPH, Jenis Aset, Nilai Perolehan, Tahun, Kondisi.")
+
+        st.write("### ✅ Preview Data Aset")
+        st.dataframe(df.head(10))
+
+        # ========================
+        # Deteksi Kolom Utama
+        # ========================
+        required_cols = ["Nama Aset*", "Nomor Aset*", "Tanggal Perolehan*", "Nilai Perolehan*", "Kondisi Aset*"]
+        missing_cols = [c for c in required_cols if c not in df.columns]
+
+        if missing_cols:
+            st.warning(f"⚠️ Kolom berikut tidak ditemukan: {missing_cols}")
+        else:
+            st.success("✅ Semua kolom penting ditemukan!")
+
+        # ========================
+        # Statistik Sederhana
+        # ========================
+        st.subheader("📈 Statistik Nilai Aset")
+        if "Nilai Perolehan*" in df.columns:
+            total_aset = df["Nilai Perolehan*"].sum()
+            rata2_aset = df["Nilai Perolehan*"].mean()
+            st.metric("Total Nilai Aset", f"Rp {total_aset:,.0f}")
+            st.metric("Rata-rata Nilai Aset", f"Rp {rata2_aset:,.0f}")
+
+        # ========================
+        # Visualisasi Kondisi Aset
+        # ========================
+        if "Kondisi Aset*" in df.columns:
+            st.subheader("📊 Distribusi Kondisi Aset")
+            kondisi_count = df["Kondisi Aset*"].value_counts()
+            st.bar_chart(kondisi_count)
+
+        # ========================
+        # Download versi bersih
+        # ========================
+        st.subheader("💾 Simpan Data Bersih")
+        cleaned_file = "data_bersih.xlsx"
+        df.to_excel(cleaned_file, index=False)
+        with open(cleaned_file, "rb") as f:
+            st.download_button("⬇️ Download Data Bersih", f, file_name="data_bersih.xlsx")
+
+    except Exception as e:
+        st.error(f"❌ Gagal memuat file: {e}")
 
 else:
-    st.info("Silakan upload file Excel/CSV untuk melihat dashboard.")
+    st.info("Silakan upload file Excel Master Data Aset terlebih dahulu.")
