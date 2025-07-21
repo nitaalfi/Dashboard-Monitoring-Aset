@@ -1,86 +1,93 @@
 import streamlit as st
 import pandas as pd
+import plotly.express as px
 
-# ========================
-# Judul Dashboard
-# ========================
 st.set_page_config(page_title="Dashboard Monitoring Aset", layout="wide")
-st.title("📊 Dashboard Monitoring Aset Perhutani")
 
-st.write("Upload file Excel Master Data Aset untuk melihat monitoring.")
+st.title("📊 Dashboard Monitoring Aset Perhutani")
 
 # ========================
 # Upload File Excel
 # ========================
-uploaded_file = st.file_uploader("📂 Upload File Excel (.xlsx)", type=["xlsx"])
+uploaded_file = st.file_uploader("📂 Upload file Excel aset (.xlsx)", type=["xlsx"])
 
 if uploaded_file:
-    st.success(f"✅ File **{uploaded_file.name}** berhasil diupload")
-
     try:
-        # Cek semua sheet di Excel
-        xls = pd.ExcelFile(uploaded_file, engine="openpyxl")
-        sheet_name = xls.sheet_names[0]  # ambil sheet pertama
+        # Load Excel
+        df = pd.read_excel(uploaded_file)
 
-        # Baca beberapa baris pertama untuk deteksi header
-        preview_df = pd.read_excel(uploaded_file, sheet_name=sheet_name, engine="openpyxl", nrows=5)
-        st.write("🔍 **Preview baris awal (untuk cek posisi header):**")
-        st.dataframe(preview_df)
-
-        # Pilihan skiprows manual
-        skip_val = st.number_input("Lewati berapa baris awal? (skiprows)", min_value=0, max_value=10, value=1)
-
-        # Baca data aset dengan skiprows yang dipilih
-        df = pd.read_excel(
-            uploaded_file,
-            sheet_name=sheet_name,
-            engine="openpyxl",
-            skiprows=skip_val
-        )
-
-        st.write("### ✅ Preview Data Aset")
-        st.dataframe(df.head(10))
+        st.success(f"✅ Data dari **{uploaded_file.name}** berhasil dimuat!")
 
         # ========================
-        # Deteksi Kolom Utama
+        # Preview Data
         # ========================
-        required_cols = ["Nama Aset*", "Nomor Aset*", "Tanggal Perolehan*", "Nilai Perolehan*", "Kondisi Aset*"]
-        missing_cols = [c for c in required_cols if c not in df.columns]
+        st.subheader("📝 Preview Data")
+        st.dataframe(df.head(20))
+
+        # ========================
+        # Validasi Kolom
+        # ========================
+        required_cols = ["KPH", "Jenis Aset", "Nilai Perolehan*", "Tahun", "Kondisi Aset*"]
+        missing_cols = [col for col in required_cols if col not in df.columns]
 
         if missing_cols:
-            st.warning(f"⚠️ Kolom berikut tidak ditemukan: {missing_cols}")
+            st.warning(f"⚠️ Kolom berikut hilang: {', '.join(missing_cols)}")
         else:
             st.success("✅ Semua kolom penting ditemukan!")
 
-        # ========================
-        # Statistik Sederhana
-        # ========================
-        st.subheader("📈 Statistik Nilai Aset")
-        if "Nilai Perolehan*" in df.columns:
-            total_aset = df["Nilai Perolehan*"].sum()
-            rata2_aset = df["Nilai Perolehan*"].mean()
-            st.metric("Total Nilai Aset", f"Rp {total_aset:,.0f}")
-            st.metric("Rata-rata Nilai Aset", f"Rp {rata2_aset:,.0f}")
+            # ========================
+            # Bersihkan Kolom Nilai Perolehan
+            # ========================
+            st.subheader("📈 Statistik Nilai Aset")
 
-        # ========================
-        # Visualisasi Kondisi Aset
-        # ========================
-        if "Kondisi Aset*" in df.columns:
-            st.subheader("📊 Distribusi Kondisi Aset")
+            df["Nilai Perolehan Bersih"] = (
+                df["Nilai Perolehan*"]
+                .astype(str)  # pastikan string
+                .str.replace(r"[^0-9.,]", "", regex=True)  # hapus semua huruf & simbol selain angka
+                .str.replace(",", ".", regex=False)  # ganti koma jadi titik
+            )
+            df["Nilai Perolehan Bersih"] = pd.to_numeric(df["Nilai Perolehan Bersih"], errors="coerce")
+
+            # Hitung statistik
+            total_aset = df["Nilai Perolehan Bersih"].sum(skipna=True)
+            rata2_aset = df["Nilai Perolehan Bersih"].mean(skipna=True)
+            jumlah_valid = df["Nilai Perolehan Bersih"].count()
+
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Total Nilai Aset", f"Rp {total_aset:,.0f}")
+            col2.metric("Rata-rata Nilai Aset", f"Rp {rata2_aset:,.0f}")
+            col3.metric("Jumlah Data Valid", f"{jumlah_valid} aset")
+
+            # ========================
+            # Visualisasi Distribusi
+            # ========================
+            st.subheader("📊 Distribusi Nilai Aset (Valid)")
+            valid_data = df[df["Nilai Perolehan Bersih"].notna()]
+            fig = px.histogram(valid_data, x="Nilai Perolehan Bersih", nbins=30,
+                               title="Distribusi Nilai Aset",
+                               labels={"Nilai Perolehan Bersih": "Nilai (Rp)"})
+            st.plotly_chart(fig, use_container_width=True)
+
+            # ========================
+            # Ringkasan Kondisi Aset
+            # ========================
+            st.subheader("🏷️ Kondisi Aset")
             kondisi_count = df["Kondisi Aset*"].value_counts()
             st.bar_chart(kondisi_count)
 
-        # ========================
-        # Download versi bersih
-        # ========================
-        st.subheader("💾 Simpan Data Bersih")
-        cleaned_file = "data_bersih.xlsx"
-        df.to_excel(cleaned_file, index=False)
-        with open(cleaned_file, "rb") as f:
-            st.download_button("⬇️ Download Data Bersih", f, file_name="data_bersih.xlsx")
+            # ========================
+            # Ringkasan per KPH
+            # ========================
+            st.subheader("📍 Ringkasan per KPH")
+            if "KPH" in df.columns:
+                kph_summary = df.groupby("KPH")["Nilai Perolehan Bersih"].sum().sort_values(ascending=False)
+                st.dataframe(kph_summary)
+
+                fig_kph = px.bar(kph_summary, title="Total Nilai Aset per KPH")
+                st.plotly_chart(fig_kph, use_container_width=True)
 
     except Exception as e:
         st.error(f"❌ Gagal memuat file: {e}")
 
 else:
-    st.info("Silakan upload file Excel Master Data Aset terlebih dahulu.")
+    st.info("⬆️ Silakan upload file Excel aset untuk mulai analisis.")
